@@ -68,7 +68,7 @@ scripts/build-release.sh                # all four release targets + SHA256SUMS
 ## Uninstall
 
 ```sh
-pkill -f 'onepilot-bridge serve'; rm -rf ~/.onepilot
+pkill -f 'onepilot-bridge s[e]rve'; rm -rf ~/.onepilot
 ```
 
 Running shells and their scrollback go with it.
