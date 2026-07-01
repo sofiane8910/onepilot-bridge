@@ -114,9 +114,11 @@ func (d *Daemon) handle(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	// Attach consumes the connection until it closes. Note the Hello has already
-	// been read off the stream; Attach's own reader continues from the next frame.
-	_ = s.Attach(conn, h)
+	// Attach consumes the connection until it closes. The Hello was read through
+	// `r`, which may have buffered frames the client sent right behind it (e.g.
+	// Input immediately after Hello), so the SAME reader must keep the stream:
+	// a fresh reader on conn would drop those bytes and desync the framing.
+	_ = s.AttachReader(conn, r, h)
 }
 
 func (d *Daemon) getOrCreate(h proto.Hello) (*session.Session, error) {

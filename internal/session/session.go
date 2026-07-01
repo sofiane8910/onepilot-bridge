@@ -191,7 +191,19 @@ func (s *Session) Kill() {
 // closes. It first sends the catch-up (an incremental gap from hello.LastSeq, or
 // a full snapshot for a fresh client), then streams live output. Attach blocks
 // for the lifetime of the connection.
+//
+// Attach owns its own buffered reader on conn. Callers that already read the
+// Hello through a buffered reader must use AttachReader with that same reader:
+// bytes the handshake reader buffered past the Hello (a client is free to send
+// Input immediately after it) would otherwise be dropped, desyncing the frame
+// stream and killing the connection.
 func (s *Session) Attach(conn net.Conn, h proto.Hello) error {
+	return s.AttachReader(conn, bufio.NewReader(conn), h)
+}
+
+// AttachReader is Attach for callers that already consumed the Hello frame from
+// `r`; reading continues from `r`, writes go to `conn`.
+func (s *Session) AttachReader(conn net.Conn, r *bufio.Reader, h proto.Hello) error {
 	s.mu.Lock()
 	if !s.alive {
 		s.mu.Unlock()
@@ -216,7 +228,7 @@ func (s *Session) Attach(conn net.Conn, h proto.Hello) error {
 	s.mu.Unlock()
 
 	go s.writeLoop(c, catchUp, snap, catchSeq)
-	s.readFromClient(c)
+	s.readFromClient(c, r)
 
 	// readFromClient returned: the connection is gone.
 	s.mu.Lock()
@@ -287,8 +299,7 @@ func (s *Session) writeLoop(c *client, catchUp []byte, snap bool, catchSeq uint6
 	}
 }
 
-func (s *Session) readFromClient(c *client) {
-	r := bufio.NewReader(c.conn)
+func (s *Session) readFromClient(c *client, r *bufio.Reader) {
 	for {
 		t, payload, err := proto.ReadFrame(r)
 		if err != nil {
