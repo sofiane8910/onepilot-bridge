@@ -79,7 +79,7 @@ func New(id string, cols, rows int, cwd, container string, onExit func(id string
 		// propagates. Prefer bash, fall back to sh. The daemon (and thus this
 		// exec) lives on the host, so the session persists across disconnects as
 		// long as the container is running.
-		cmd = exec.Command("docker", "exec", "-it", container, "/bin/sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi")
+		cmd = exec.Command(dockerBinary(), "exec", "-it", container, "/bin/sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi")
 	} else {
 		shell := os.Getenv("SHELL")
 		if shell == "" || !fileExists(shell) {
@@ -328,6 +328,31 @@ func (s *Session) readFromClient(c *client, r *bufio.Reader) {
 			// Ignore unknown frame types for forward compatibility.
 		}
 	}
+}
+
+// dockerBinary resolves the docker CLI to an absolute path. The daemon is
+// normally started from a non-login SSH exec ("ssh host onepilot-bridge serve"),
+// which inherits a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin). That omits the
+// dirs Docker Desktop and Homebrew install into, so a bare "docker" exec fails
+// with "executable file not found" and the forked child dies as a zombie,
+// leaving the container session unable to accept input. Searching the common
+// locations as well means container sessions work even when PATH is stripped;
+// host shells were never affected because they exec an absolute shell path.
+func dockerBinary() string {
+	if p, err := exec.LookPath("docker"); err == nil {
+		return p
+	}
+	for _, c := range []string{
+		"/usr/local/bin/docker",    // Docker Desktop (Intel mac), many Linux distros
+		"/opt/homebrew/bin/docker", // Homebrew (Apple silicon)
+		"/usr/bin/docker",          // Linux package managers
+		"/snap/bin/docker",         // Ubuntu snap
+	} {
+		if fileExists(c) {
+			return c
+		}
+	}
+	return "docker" // last resort: let exec surface a clear not-found error
 }
 
 func fileExists(p string) bool {

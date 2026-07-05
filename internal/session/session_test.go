@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -175,4 +176,23 @@ func TestSessionResize(t *testing.T) {
 		t.Fatalf("resize not applied; output: %q", out)
 	}
 	_ = cli.Close()
+}
+
+// TestDockerBinaryResolvesUnderStrippedPATH guards the container-session fix:
+// the daemon usually runs from a non-login SSH exec whose PATH omits the dirs
+// Docker Desktop / Homebrew install into. dockerBinary must still resolve docker
+// to an absolute path so `docker exec` does not fail (which left the shell a
+// zombie and the terminal unable to accept input).
+func TestDockerBinaryResolvesUnderStrippedPATH(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+	got := dockerBinary()
+	if got == "docker" {
+		t.Skip("docker not installed in any known location; nothing to resolve")
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("expected an absolute docker path under a stripped PATH, got %q", got)
+	}
+	if !fileExists(got) {
+		t.Fatalf("resolved docker path does not exist: %q", got)
+	}
 }
