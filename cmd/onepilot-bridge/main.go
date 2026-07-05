@@ -35,7 +35,7 @@ import (
 	"github.com/sofiane8910/onepilot-bridge/internal/proto"
 )
 
-const version = "0.1.2"
+const version = "0.1.3"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -86,8 +86,21 @@ func stateDir() string {
 	return filepath.Join(home, ".onepilot")
 }
 
-func portFilePath() string { return filepath.Join(stateDir(), "bridge.port") }
-func logFilePath() string  { return filepath.Join(stateDir(), "bridge.log") }
+func portFilePath() string    { return filepath.Join(stateDir(), "bridge.port") }
+func versionFilePath() string { return filepath.Join(stateDir(), "bridge.version") }
+func logFilePath() string     { return filepath.Join(stateDir(), "bridge.log") }
+
+// writeVersionFile records the version of the daemon that is actually running.
+// The installer replaces the binary by rename (new inode) without disturbing a
+// live daemon, so `--version` on the file can read newer than the process that
+// is still serving. This file lets the app detect a stale daemon and restart it.
+func writeVersionFile() error {
+	tmp := versionFilePath() + ".tmp"
+	if err := os.WriteFile(tmp, []byte(version), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, versionFilePath())
+}
 
 func ensureStateDir() error { return os.MkdirAll(stateDir(), 0o700) }
 
@@ -174,6 +187,10 @@ func runDaemonChild(port int) {
 	if err := writePortFile(actual); err != nil {
 		fmt.Fprintln(os.Stderr, "daemon: port file:", err)
 		os.Exit(1)
+	}
+	// Best effort: record the running version so the app can spot a stale daemon.
+	if err := writeVersionFile(); err != nil {
+		fmt.Fprintln(os.Stderr, "daemon: version file:", err)
 	}
 	fmt.Fprintf(os.Stderr, "onepilot-bridge daemon listening on 127.0.0.1:%d\n", actual)
 	if err := d.Serve(); err != nil {

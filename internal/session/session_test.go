@@ -196,3 +196,46 @@ func TestDockerBinaryResolvesUnderStrippedPATH(t *testing.T) {
 		t.Fatalf("resolved docker path does not exist: %q", got)
 	}
 }
+
+// TestSessionContainerUnderStrippedPATH reproduces the exact failure: the daemon
+// runs from a non-login SSH exec whose PATH omits the dir docker lives in. Before
+// the dockerBinary fix, New's `docker exec` failed here, the shell died as a
+// zombie, and the container terminal could not accept input. It must now work.
+func TestSessionContainerUnderStrippedPATH(t *testing.T) {
+	dockerAbs, err := exec.LookPath("docker")
+	if err != nil {
+		t.Skip("docker not installed")
+	}
+	if err := exec.Command(dockerAbs, "info").Run(); err != nil {
+		t.Skip("docker not usable")
+	}
+	name := fmt.Sprintf("op-bridge-strippath-%d", os.Getpid())
+	_ = exec.Command(dockerAbs, "rm", "-f", name).Run()
+	if err := exec.Command(dockerAbs, "run", "-d", "--name", name, "alpine", "sleep", "300").Run(); err != nil {
+		t.Skipf("could not start test container: %v", err)
+	}
+	// Use the absolute path for cleanup so it works even while PATH is stripped.
+	defer func() { _ = exec.Command(dockerAbs, "rm", "-f", name).Run() }()
+
+	// The daemon's real, minimal PATH — docker is NOT on it.
+	t.Setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+
+	s, err := New("t-container-strip", 80, 24, "", name, func(string) {})
+	if err != nil {
+		t.Fatalf("new container session under stripped PATH: %v", err)
+	}
+	defer s.Kill()
+
+	srv, cli := net.Pipe()
+	go s.Attach(srv, proto.Hello{SessionID: "t-container-strip", Cols: 80, Rows: 24, Container: name})
+	r := bufio.NewReader(cli)
+
+	if err := proto.WriteFrame(cli, proto.TypeInput, []byte("apk --version\r")); err != nil {
+		t.Fatal(err)
+	}
+	out, _, ok := readOutputUntil(cli, r, "apk-tools", 10*time.Second)
+	if !ok {
+		t.Fatalf("container shell under stripped PATH did not accept input; got: %q", out)
+	}
+	_ = cli.Close()
+}
